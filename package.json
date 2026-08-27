@@ -7,10 +7,10 @@
   "homepage": "https://rnp.egobytes.com/docs",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/egobytes/rnp-api-js.git"
+    "url": "git+https://github.com/josephrr/rnp-api-js.git"
   },
   "bugs": {
-    "url": "https://github.com/egobytes/rnp-api-js/issues"
+    "url": "https://github.com/josephrr/rnp-api-js/issues"
   },
   "keywords": [
     "costa-rica",
