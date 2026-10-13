@@ -1,12 +1,22 @@
 import { RnpError } from './errores.js';
-import type { Clase, Consulta, EstadoRegistral, Opciones } from './tipos.js';
+import type { Clase, Consulta, ConsultaDekra, EstadoRegistral, Opciones } from './tipos.js';
 
 const BASE_POR_DEFECTO = 'https://rnp.egobytes.com/api/v1';
 
 /** El Registro suele tardar entre 3 y 10 segundos; 45 deja margen de sobra. */
 const TIEMPO_LIMITE = 45_000;
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
+
+/** Lo que se escribe en `clase`, en mayúsculas, => la clave del contrato. */
+const CLASES: Record<string, Clase> = {
+  PARTICULAR: 'particular',
+  CL: 'CL',
+  MOT: 'MOT',
+  M: 'MOT',
+  MOTO: 'MOT',
+  MOTOCICLETA: 'MOT',
+};
 
 const espera = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -18,6 +28,7 @@ const espera = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * const consulta = await rnp.porPlaca('BJK123');
  *
  * console.log(consulta.datos.vehiculo?.marca, consulta.saldo?.total);
+ * console.log(consulta.datos.vencimiento_dekra?.fecha);
  * ```
  *
  * Sin dependencias: usa `fetch`, que Node trae desde la 18.
@@ -69,19 +80,22 @@ export class RnpApi {
   /**
    * Consulta por placa.
    *
-   * En carga liviana va solo el número: el `CL` es la clase, no parte de la
-   * placa. `porPlaca('272490', 'CL')`, no `porPlaca('CL272490')`.
+   * En carga liviana y en moto va solo el número: el `CL` o la `M` son la
+   * clase, no parte de la placa. `porPlaca('272490', 'CL')`, no
+   * `porPlaca('CL272490')`. En moto, `porPlaca('123456', 'MOT')`.
    */
-  async porPlaca(placa: string, clase: Clase = 'particular'): Promise<Consulta> {
-    const limpia = placa.trim().toUpperCase();
+  async porPlaca(placa: string, clase: Clase | string = 'particular'): Promise<Consulta> {
+    return (await this.consultar(this.rutaDePlaca(placa, clase, '/vehiculos/placa/', 10))) as Consulta;
+  }
 
-    if (!/^[A-Z0-9]{1,10}$/.test(limpia)) {
-      throw new Error('La placa se escribe sin guiones ni espacios.');
-    }
-
-    const ruta = `/vehiculos/placa/${encodeURIComponent(limpia)}`;
-
-    return this.consultar(clase === 'CL' ? `${ruta}?clase=CL` : ruta);
+  /**
+   * Solo el día en que vence la revisión técnica, según Dekra.
+   *
+   * No consulta el Registro y no descuenta saldo: `cobrada` es siempre
+   * false. Si Dekra no publica fecha, `datos` llega en null y no es un error.
+   */
+  async dekraPorPlaca(placa: string, clase: Clase | string = 'particular'): Promise<ConsultaDekra> {
+    return (await this.consultar(this.rutaDePlaca(placa, clase, '/dekra/placa/', 12))) as ConsultaDekra;
   }
 
   /** Consulta por número de VIN o chasis. */
@@ -92,7 +106,21 @@ export class RnpApi {
       throw new Error('El VIN se escribe sin guiones ni espacios.');
     }
 
-    return this.consultar(`/vehiculos/vin/${encodeURIComponent(limpio)}`);
+    return (await this.consultar(`/vehiculos/vin/${encodeURIComponent(limpio)}`)) as Consulta;
+  }
+
+  /** Arma la ruta de una placa. El largo lo pone el endpoint, no la clase. */
+  private rutaDePlaca(placa: string, clase: string, prefijo: string, maximo: number): string {
+    const limpia = placa.trim().toUpperCase();
+
+    if (!new RegExp(`^[A-Z0-9]{1,${maximo}}$`).test(limpia)) {
+      throw new Error('La placa se escribe sin guiones ni espacios.');
+    }
+
+    const canonica = claseCanonico(clase);
+    const ruta = `${prefijo}${encodeURIComponent(limpia)}`;
+
+    return canonica === 'particular' ? ruta : `${ruta}?clase=${encodeURIComponent(canonica)}`;
   }
 
   /**
@@ -101,7 +129,7 @@ export class RnpApi {
    * Un 402 o un 404 dan lo mismo diez veces; reintentarlos solo gasta tiempo.
    * El límite por minuto sí se respeta esperando lo que el propio API indica.
    */
-  private async consultar(ruta: string): Promise<Consulta> {
+  private async consultar(ruta: string): Promise<unknown> {
     for (let intento = 0; ; intento++) {
       try {
         return await this.pedir(ruta);
@@ -119,7 +147,7 @@ export class RnpApi {
     }
   }
 
-  private async pedir(ruta: string): Promise<Consulta> {
+  private async pedir(ruta: string): Promise<unknown> {
     const corte = AbortSignal.timeout(this.tiempoLimite);
 
     let respuesta: Response;
@@ -154,8 +182,24 @@ export class RnpApi {
       throw RnpError.desdeRespuesta(cuerpo, respuesta.status);
     }
 
-    return cuerpo as Consulta;
+    return cuerpo;
   }
+}
+
+/**
+ * La clave canónica de la clase, o un error si no es ninguna.
+ *
+ * Acepta lo que dice la placa (`M`) y lo que dice el contrato (`MOT`),
+ * sin distinguir mayúsculas.
+ */
+export function claseCanonico(clase: string): Clase {
+  const canonica = CLASES[clase.trim().toUpperCase()];
+
+  if (!canonica) {
+    throw new Error(`Clase no válida: '${clase}'. Use 'particular', 'CL' o 'MOT'.`);
+  }
+
+  return canonica;
 }
 
 /**

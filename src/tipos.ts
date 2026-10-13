@@ -35,6 +35,75 @@ export interface Propietario {
   nombre?: string | null;
 }
 
+/**
+ * El día en que vence la revisión técnica según Dekra.
+ *
+ * `vigente` es true si `fecha` es hoy o posterior, en hora de Costa Rica.
+ * El objeto entero llega en null si Dekra no publica fecha. No es el mes de
+ * `inspeccion_tecnica`, que se deduce del último dígito de la placa.
+ */
+export interface VencimientoDekra {
+  /** Día `AAAA-MM-DD`. */
+  fecha: string;
+  /** La placa con la que Dekra contestó, sin espacios. */
+  placa: string;
+  vigente: boolean;
+}
+
+/**
+ * Cuándo toca la inspección técnica, deducido del último dígito de la placa.
+ *
+ * 1 es enero, 2 febrero … 9 setiembre y 0 octubre. Se puede hacer desde el
+ * mes anterior. null si la placa no termina en dígito.
+ */
+export interface InspeccionTecnica {
+  entidad: string;
+  digito: number;
+  mes: number;
+  mes_nombre: string;
+  desde_mes: number;
+  desde_mes_nombre: string;
+  nota: string;
+}
+
+/**
+ * Un monto estimado en colones. `referencial` es siempre true: no es lo que
+ * cobran el INS ni la notaría.
+ */
+export interface Estimacion {
+  anio: number;
+  referencial: true;
+  /** El valor fiscal sobre el que se calculó. */
+  base: number;
+  moneda: 'CRC';
+  /** Solo en el marchamo: decide el seguro y la tabla del impuesto. */
+  tipo_vehiculo?: 'particular' | 'moto' | 'carga_liviana';
+  /** Cada rubro en colones enteros. Sumados dan `total`. */
+  rubros: Record<string, number>;
+  total: number;
+  nota: string;
+}
+
+/** Marchamo y traspaso. Cada uno en null si no hay valor fiscal. */
+export interface Estimaciones {
+  marchamo: Estimacion | null;
+  traspaso: Estimacion | null;
+}
+
+/**
+ * De dónde viene el vehículo según su VIN, decodificado por la NHTSA.
+ *
+ * null cuando no conoce el VIN o el VIN no tiene 17 caracteres. Cada campo
+ * puede venir en null por separado.
+ */
+export interface Origen {
+  pais_fabricacion: string | null;
+  ciudad_planta: string | null;
+  estado_planta: string | null;
+  fabricante: string | null;
+  anio_modelo: number | null;
+}
+
 export interface DatosDelVehiculo {
   vehiculo?: Record<string, string | Asiento | null | undefined>;
   motor?: Record<string, string | null | undefined>;
@@ -44,6 +113,10 @@ export interface DatosDelVehiculo {
   infracciones?: EstadoRegistral;
   levantamientos?: EstadoRegistral;
   fecha_emision?: string | null;
+  inspeccion_tecnica?: InspeccionTecnica | null;
+  vencimiento_dekra?: VencimientoDekra | null;
+  estimaciones?: Estimaciones | null;
+  origen?: Origen | null;
 }
 
 /** Las consultas que quedan, tal como quedaron tras esta llamada. */
@@ -72,8 +145,24 @@ export interface Consulta {
   request_id: string | null;
 }
 
-/** Las dos clases de placa que acepta el API. */
-export type Clase = 'particular' | 'CL';
+/**
+ * Las clases de placa del contrato. En la moto también se acepta `M`,
+ * `MOTO` y `MOTOCICLETA`, que el cliente normaliza a `MOT`.
+ */
+export type Clase = 'particular' | 'CL' | 'MOT';
+
+/**
+ * Solo el vencimiento de Dekra.
+ *
+ * No trae vehículo ni saldo: no se le preguntó al Registro. `cobrada` es
+ * siempre false. `datos` en null significa que Dekra no publicó fecha.
+ */
+export interface ConsultaDekra {
+  datos: VencimientoDekra | null;
+  cobrada: boolean;
+  consultado_en: string | null;
+  request_id: string | null;
+}
 
 export interface Opciones {
   apiKey: string;

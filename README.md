@@ -2,7 +2,8 @@
 
 Cliente del API de consulta vehicular del **Registro Nacional de Costa Rica**.
 Consulta por placa o por VIN y devuelve características, motor, propietarios y
-situación registral.
+situación registral. Además trae el vencimiento de Dekra, el mes de la
+inspección, una estimación de marchamo y traspaso, y el origen del VIN.
 
 Sin dependencias: usa `fetch`, que Node trae desde la 18. Tipado en TypeScript.
 
@@ -53,6 +54,49 @@ await rnp.porPlaca('CL272490');       // no encuentra nada
 
 ```ts
 const consulta = await rnp.porVin('8AJHA8CD704309461');
+```
+
+## Motocicleta
+
+La `M` de la placa es la clase, igual que el `CL`. Se acepta `MOT`, `M`,
+`MOTO` o `MOTOCICLETA`:
+
+```ts
+await rnp.porPlaca('123456', 'MOT');
+await rnp.porPlaca('123456', 'M');    // lo mismo
+```
+
+## Lo que el API añade
+
+Cada consulta de vehículo trae cuatro datos que no salen del Registro. Si no
+se pueden calcular llegan en `null` y la respuesta igual se entrega:
+
+```ts
+consulta.datos.vencimiento_dekra?.fecha;          // 2028-02-29
+consulta.datos.vencimiento_dekra?.vigente;        // true si es hoy o después
+consulta.datos.inspeccion_tecnica?.mes_nombre;    // el mes, por el último dígito
+consulta.datos.estimaciones?.marchamo?.total;     // colones, referencial
+consulta.datos.origen?.pais_fabricacion;          // o null
+```
+
+`vigente` usa la hora de Costa Rica. El día de vencimiento todavía cuenta.
+`estimaciones` no es el monto del INS ni de la notaría: `referencial` es
+siempre `true`. El marchamo trae `tipo_vehiculo` (`particular`, `moto` o
+`carga_liviana`). `origen` cubre bien lo vendido en Estados Unidos; para el
+resto suele ir en `null`.
+
+## Solo la fecha de Dekra
+
+No consulta el Registro y no descuenta saldo. `cobrada` es siempre `false`.
+Si Dekra no publica fecha, `datos` llega en `null`: no es un error.
+
+```ts
+const dekra = await rnp.dekraPorPlaca('BJK123');
+const liviana = await rnp.dekraPorPlaca('272490', 'CL');
+
+dekra.datos?.fecha;      // 2028-02-29, o undefined si datos es null
+dekra.datos?.vigente;    // true o false
+dekra.cobrada;           // false
 ```
 
 ## Gravámenes y anotaciones
@@ -138,9 +182,9 @@ new RnpApi({ apiKey, reintentos: 0 });   // sin reintentos
 
 ## Cómo se cobra
 
-Se descuenta **una consulta por cada respuesta completa**. Si el Registro no
-responde, responde a medias o rechaza la petición, la consulta no se cobra, y
-la respuesta lo dice:
+Se descuenta **una consulta por cada respuesta completa** de placa o de VIN.
+`dekraPorPlaca()` no descuenta nunca. Si el Registro no responde, responde a
+medias o rechaza la petición, la consulta no se cobra, y la respuesta lo dice:
 
 ```ts
 consulta.cobrada;                  // false cuando no se descontó
